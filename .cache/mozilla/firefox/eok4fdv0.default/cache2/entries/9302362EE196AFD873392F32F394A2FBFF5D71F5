@@ -1,0 +1,699 @@
+
+tabAllowHash = true;
+
+var firstLoad = true,
+	firstHash = 2,
+	modal,
+	noScrollTop = false,
+	upgradeModal,
+	editModal,
+	lpChannel,
+	portfolioPieConfig = {
+		width: function() {
+			return $(this).parent().width();
+		},
+		height: 200,
+		is3D: true,
+		titlePosition: 'none',
+		legend: { position: 'none' },
+		chartArea: { left: '0%', top: '0%', width: '100%', height: '100%' }
+	},
+	portfolioPieConfigModal = {
+		width: 600,
+		height: 350,
+		titlePosition: 'none',
+		legend: 'right',
+		tooltip: { text: 'percentage' },
+		is3D: true,
+		chartArea: { left: '0%', top: '0%', width: '100%', height: '100%' },
+		pieSliceText: 'label',
+		backgroundColor: { fill: 'transparent' }
+	},
+	pis = new Array();
+
+if (isAjax) {
+	var tabName,
+		cacheTabName,
+		ajaxRequest = new Array(),
+		ajaxCacheRequest = new Array(),
+		cacheRequest,
+		liveDefer = false,
+		liveWhoisReady = false,
+		dropped = false,
+		firstLoad = true,
+		lpt,
+		DELIMITER = '~~||~~',
+		deferredsActive = 0,
+		deferredActive = new Array(),
+		vx,
+		loadedTabs = new Array(),
+		tab,
+		tabMode,
+		messageTarget;
+
+	$(document).ready(function() {
+
+		$('.tab').hide();
+		$('#den-disclaimer').hide();
+
+		// DEN Tabs
+		$('.den-tabs > li > a:not(.static)').live('click', function() {
+
+			$(this).blur().parent().parent().children('.active').removeClass('active');
+			$(this).parent().addClass('active');
+
+			tabName = $(this).attr('href').replace('#', '');
+			tab = '#den .tab.' + tabName;
+
+			if (firstHash != 2) window.location.hash = tabName;
+			firstHash--;
+
+			$('#den .tab').hide();
+			$(tab).removeClass('unloaded').addClass('active').show().find('input.focus').focus();
+			
+			$('.tab-error').text('');
+
+			if (window.et) if (et) {
+				clearTimeout(et);
+				et = false;
+			}
+
+			!noScrollTop && window.scrollTo(0, 0);
+			noScrollTop = false;
+			$('#error-box').hide();
+			
+			if (cacheRequest) {
+				clearTimeout(cacheRequest);
+				cacheRequest = null;
+			}
+
+			// Is this tab already loaded?
+			if (loadedTabs[tabName] == true) {
+				window.scrollTo(0, 0);
+				$('#error-box').hide();
+				$('body').trigger('tab_reveal_' + tabName);
+				return false;
+			}
+
+			// Loader messaging
+			delayStartLongPolling();
+			messageTarget = '.tab.' + tabName + '.loading';
+			$(messageTarget).append('<h2 style="text-align: center; color: #999; padding-top: 240px;" />');
+			messageTarget += ' h2';
+			
+			// Tab load request
+			var params = { piece: tabName, ss: session };
+			if (tabMode) {
+				params = $.extend({}, params, tabMode);
+			}
+			if (noSimulCache) {
+				params.no_simul_cache = true;
+			}
+
+			// Start loading the tab
+			ajaxRequest[tabName] = $.post(uri, params, function(data, status, xhr) {
+				if (liveDefer) {
+					liveDefer = false;
+				}
+				
+				showTab(data);
+				ajaxRequest[tabName] = null;
+			});
+			
+			return false;
+			
+		});
+
+		$('body')
+		.unbind('long_poll_message')
+		.bind('long_poll_message', function(e) {
+			if (messageTarget) {
+				$(messageTarget).stop()
+				.show()
+				.html(e.message);
+			} else {
+				showLoader(e.message);
+			}
+		})
+		
+		.unbind('long_poll_start')
+		.bind('long_poll_start', function() {
+			if (!messageTarget) showLoader('&nbsp;');
+		})
+		
+		.unbind('long_poll_stop')
+		.bind('long_poll_stop', function() {
+			if (lpt) {
+				clearTimeout(lpt);
+				lpt = null;
+			}
+			hideLoader();
+			messageTarget = '';
+		})
+		
+		// this means we need to not request a cached copy, or stop requesting one if we started
+		.unbind('long_poll_no_cache_request')
+		.bind('long_poll_no_cache_request', function() {
+			if (cacheRequest) {
+				clearTimeout(cacheRequest);
+				cacheRequest = null;
+			}
+			
+			if (ajaxCacheRequest[tabName]) {
+				if (ajaxCacheRequest[tabName].state() == 'pending') {
+					ajaxCacheRequest[tabName].abort();
+					ajaxCacheRequest[tabName] = null;
+				}
+			}
+		})
+
+		.unbind('long_poll_live_whois_ready')
+		.bind('long_poll_live_whois_ready', function() {
+			$('#cache-notice .cache-loading').fadeOut(250, function() {
+				$('#cache-notice .cache-ready').fadeIn(250);
+			});
+			liveWhoisReady = true;
+		})
+
+	});
+	
+	function showTab(data, keepLP) {
+
+		if (!data) return;
+
+		// Clear waiting cache request
+		if (cacheRequest) {
+			clearTimeout(cacheRequest);
+			cacheRequest = null;
+		}
+
+		// Stop messaging
+		$('body').trigger('long_poll_stop');
+
+		window.scrollTo(0, 0);
+				
+		data = data.split(DELIMITER);
+
+		if (data[0] == 'error') {
+			alert("Error: " + data[1]);
+			return;
+		} else if (data[0] == 'redirect') {
+			redirect(data[1], true);
+			return;
+		}
+
+		tabName = data[0];
+		
+		if (data.length == 2) {
+			data = data[1];
+		}
+		
+		else if (data.length == 3) {
+			if (data[1] == 'drop' && (ajaxRequest[tabName] || ajaxCacheRequest[tabName])) {
+				if (ajaxRequest[tabName]) {
+					ajaxRequest[tabName].abort();
+					ajaxRequest[tabName] = null;
+				}
+				
+				if (ajaxCacheRequest[tabName]) {
+					ajaxCacheRequest[tabName].abort();
+					ajaxCacheRequest[tabName] = null;
+				}
+				
+				dropped = true;
+			}
+			data = data[2];
+		}
+
+		if ($('.tab.' + tabName).length == 0 || data.length == 1) {
+			$('.tab.loading').hide();
+			$('#error-box').show().children('div:last').html('<pre>' + data + '</pre>');
+			
+			return false;
+		}
+		
+		var vis = $('.tab.' + tabName).is(':visible');
+
+		$('.tab.' + tabName).replaceWith('<div ' + ($('.tab.' + tabName).attr('id') ? 'id="' + $('.tab.' + tabName).attr('id') + '" ' : '') + 'class="tab ' + tabName + '"' + (!vis ? ' style="display: none;"' : '') + '>' + data + '</div>');
+		
+		messageTarget = '';
+		setup_tips();
+
+		firstLoad = false;
+		if (!keepLP && deferredsActive == 0) {
+			stop_long_polling();
+		}
+
+		$('body').trigger('tab_shown');
+		$('body').trigger('tab_reveal_' + tabName);
+
+		$('#den-disclaimer').show();
+		
+		return loadedTabs[tabName] = true;
+	}
+	
+	function switchTab(setTabName, opts) {
+		
+		if (opts) tabMode = opts;
+
+		$('ul.den-tabs li a.' + setTabName).trigger('click');
+		
+		if ($('.dataTables_filter input').length && $('.dataTables_filter input').val()) {
+			$('.dataTables_filter input').val('').trigger('keyup');
+		}
+
+	}
+
+	function addTransientTab(setTabName, title, opts) {
+
+		if (opts) tabMode = opts; else tabMode = null;
+
+		$('#transient-tab-content').html('').removeAttr('class').addClass(setTabName).addClass('tab').addClass('loading').addClass('unloaded');
+
+		$('#transient-tab a').removeAttr('class').addClass(setTabName).attr('href', '#' + setTabName).children('span').text(title);
+		$('#transient-tab').show().removeClass('active');
+
+		loadedTabs[setTabName] = false;
+		noScrollTop = true;
+		$('#transient-tab a').trigger('click');
+
+	}
+
+	$('#transient-tab a img').live('click', function() {
+		if ($('#transient-tab').hasClass('active')) {
+			$('.den-tabs li:first a').trigger('click');
+		}
+
+		$('#transient-tab').css({ overflow: 'hidden', whiteSpace: 'nowrap', height: '2em' }).animate({ width: 0, opacity: 0 }, 300, function() {
+			$(this).removeAttr('style').hide();
+		});
+		return false;
+	});
+	
+	function clearAndLoader(t) {
+
+		var w = t.width();
+		var h = t.height();
+		if (h > 500) h = 500;
+
+		t.html('').css({ height: h + 'px', width: w + 'px' }).addClass('box-loading');
+
+	}
+	
+	function saveBlock(s) {
+
+		$('<div class="saved" s="' + s + '" style="display: none;" />').html($(s).html()).appendTo('body');
+
+	}
+	
+	function restoreBlock(s) {
+
+		$(s).html($('.saved[s=' + s + ']').html());
+		$('.saved[s=' + s + ']').remove();
+
+	}
+	
+	function delayStartLongPolling() {
+
+		lpt = setTimeout(function() {
+			start_long_polling(lpChannel);
+		}, 25);
+
+	}
+	
+	function loadDeferred(px, extra_params, callback) {
+
+		if (!isAjax) {
+			console.log("WARN: loadDeferred " + px + " in non-Ajax mode");
+			return;
+		}
+
+		var url = window.requestUrl ? requestUrl : window.location.pathname + window.location.search;
+		
+		if (!is_long_polling()) {
+			start_long_polling(lpChannel);
+		}
+		
+		deferredsActive++;
+		deferredActive[px] = true;
+		
+		var pdata = { piece: px, deferred: true, ss: session };
+		if (extra_params) {
+			pdata = $.extend({}, pdata, extra_params);
+		}
+		
+		url += '&p=' + px.substring(px.length - 2);
+		
+		$.post(url, pdata, function(data) {
+			data = data.split(DELIMITER);
+			if (data[0].length <= 64 && data[0].length > 0) {
+				var target;
+				if ($('#defer_' + data[0], tab).length) {
+					target = $('#defer_' + data[0], tab);
+				} else if ($('.defer_' + data[0], tab).length) {
+					target = $('.defer_' + data[0], tab);
+				} else if ($('.tab.' + data[0], tab).length) {
+					target = $('.tab.' + data[0], tab);
+				}
+				
+				if (target) {
+					target.html(data[data.length - 1]);
+					
+					if (target.hasClass('box-loading')) {
+						target.removeClass('box-loading')
+							  .removeAttr('style');
+					}
+
+					target.removeClass('defer-loading-pie');
+				}
+			}
+			
+			deferredsActive--;
+			deferredActive[px] = false;
+
+			if (deferredsActive == 0) {
+				stop_long_polling();
+			}
+
+			if (target) if (target.parents('.widget')) {
+				target.parents('.widget').parents('.row').find('.widget-autosized').removeClass('widget-autosized');
+			}
+			
+			setup_tips();
+
+			callback && callback();
+		});
+	}
+}
+
+else {
+
+	$(document).ready(function() {
+		$('.tab').hide();
+
+		// DEN Tabs
+		$('.den-tabs li a:not(.static)').live('click', function() {
+
+			$(this).blur().parent().parent().children('.active').removeClass('active');
+			$(this).parent().addClass('active');
+
+			tabName = $(this).attr('href').replace('#', '');
+			tab = '#den .tab.' + tabName;
+
+			$('#den .tab').hide();
+			$(tab).show();
+			$('body').trigger('tab_reveal_' + tabName);
+			
+			return false;
+			
+		});
+	});
+
+	function switchTab(setTabName, opts) {
+		$('ul.den-tabs li a.' + setTabName).trigger('click');
+	}
+}
+
+$(document).ready(function() {
+
+	$('a.goto-tab').die().live('click', function() {
+		$('ul.den-tabs li a.' + $(this).attr('tab')).trigger('click');
+	});
+	
+	var modalStep = 0; 
+	
+	$('#report-type, #report-type .to-modal').hoverIntent(function() {
+		modalStep++;
+		stepper(this);
+	}, function() {
+		modalStep--;
+		stepper(this);
+	});
+	
+	function stepper(that) {
+		if (modalStep == 0) {
+			$('#report-type .to-modal').stop().css({ opacity: 1 }).fadeOut(250, function() {
+				$(this).removeClass('modal').hide();
+			});
+		} else if (modalStep == 1) {
+			$('#report-type .to-modal').stop().addClass('modal').css({ opacity: 1 }).hide().fadeIn(250).show();
+		}
+	}
+	
+	if (reportType == 'basic') {
+		$('#den-upgrade-show,.den-upgrade-show').live('click', function() {
+
+			$('.modal,.modal-backdrop').remove();
+			$(this).closest('.to-modal').hide();
+			
+			upgradeModal = $('<div id="den-upgrade" />').dialog2({
+				title: "Upgrade to Comprehensive Report",
+				autoOpen: true,
+				closeOnOverlayClick: false,
+				closeOnEscape: true,
+				removeOnClose: true,
+				showCloseHandle: true
+			});
+			
+			$('#den-upgrade').html('<img src="/images/gears24.gif" /> &nbsp;&nbsp;Please wait...');
+			$('#den-upgrade').load('/sub?limit_den_comprehensive&do&quantity=1&modal=1');
+			
+			$('#den-upgrade').on('event-success', function() {
+				$.post('den_upgrade', { s: session, comprehensive: true }, function() {
+					document.location.reload(true);
+				});
+			});
+			
+			return false;
+		});
+		
+		$('#den-upgrade-now,.den-upgrade-now').live('click', function() {
+			$(this).replaceWith('<img src="/images/gears24.gif" /> &nbsp;&nbsp;Please wait...');
+			$.post('den_upgrade', { s: session, comprehensive: true }, function() {
+				document.location.reload(true);
+			});
+			
+			return false;
+		});
+	}
+
+	$('.words-controls,.pie-controls').die().live('defer-loaded', function() {
+		var v = $(this).find('.word-cloud');
+		if (!v.length) v = $(this).find('.data');
+
+		if (v.length) {
+			if ($('.widget-controls', this).length == 0) {
+				if ($(this).hasClass('pie-controls')) {
+					// <li><a href="#" class="pie-zoom"><img src="/images/icons/magnifier-zoom-in.png" /></a></li>
+					$(this).find('.widget-header').prepend('<ul class="widget-controls"><li class="active"><a href="#" class="pie-mode" pie-mode="chart"><img src="/images/icons/' + ($(this).find('.word-cloud').length ? 'tag-cloud' : 'chart-pie') + '.png" /></a></li><li><a href="#" class="pie-mode" pie-mode="list"><img src="/images/icons/document-list.png" /></a></li></ul>');
+				} else {
+					$(this).find('.widget-header').prepend('<ul class="widget-controls"><li class="active"><a href="#" class="pie-mode" pie-mode="chart"><img src="/images/icons/' + ($(this).find('.word-cloud').length ? 'tag-cloud' : 'chart-pie') + '.png" /></a></li><li><a href="#" class="pie-mode" pie-mode="list"><img src="/images/icons/document-list.png" /></a></li></ul>');
+				}
+			}
+		}
+
+		else if ($(this).hasClass('pie-controls')) {
+			//$(this).find('.widget-header').prepend('<ul class="widget-controls"><li><a href="#" class="pie-zoom"><img src="/images/icons/magnifier-zoom-in.png" /></a></li></ul>');
+		}
+		
+		$('.pie-mode-all').parent().show();
+	});
+	
+	$('.pie-mode').die().live('click', function() {
+		var d = $(this).parent().parent().parent().parent().parent().find('.data');
+		if ($(this).attr('pie-mode') == 'chart') {
+			d.hide();
+			d.prev().show();
+		} else {
+			d.prev().hide();
+			d.show();
+		}
+		$(this).parent().parent().children().removeClass('active');
+		$(this).parent().addClass('active');
+		$(this).blur();
+		
+		return false;
+	});
+	
+	$('.pie-mode-all').die().live('click', function() {
+		if ($(this).attr('pie-mode') == 'chart') {
+			$('.pie-btn-set').each(function() {
+				$(this).children(':eq(0)').trigger('click');
+			});
+		} else {
+			$('.pie-btn-set').each(function() {
+				$(this).children(':eq(1)').trigger('click');
+			});
+		}
+	});
+
+	$('a.goto-domains').die().click(function() {
+		$('.modal .modal-header a.close').trigger('click');
+		switchTab('domains');
+		
+		return false;
+	});
+
+	$('.refresh-report').live('click', function() {
+		window.location.replace(window.location + '&no_session_first');
+	});
+	
+	$('#hdr-name-activate').click(function() {
+		$('#hdr-name .more-label').trigger('click');
+		return false;
+	});
+
+	$('#active-domains-owned,.active-domains-owned').live('click', function() {
+		switchTab('domains', { domain_list_mode: 'active' });
+		return false;
+	});
+
+	if (whoisHistory) {
+		$('#historical-domains-owned').live('click', function() {
+			switchTab('domains', { domain_list_mode: 'historical' });
+			return false;
+		});
+	}
+
+	$('#edit-report').die().live('click', function() {
+		editModal = $('<div id="den-edit" />').dialog2({
+			title: "Customize Report",
+			closeOnOverlayClick: false,
+			closeOnEscape: true,
+			removeOnClose: true,
+			showCloseHandle: true,
+			content: '/den_edit?r=' + shieldRequestString
+		});	
+	});
+
+	$('#edit-report-preview').die().live('click', function() {
+		editModal = $('<div id="den-edit" />').dialog2({
+			title: "Customize Report",
+			closeOnOverlayClick: true,
+			closeOnEscape: true,
+			removeOnClose: true,
+			showCloseHandle: true,
+			content: '/sub?limit_den_edit&modal=1'
+		});
+	});
+
+	$('#delete-report').die().live('click', function() {
+		if (confirm("Are you sure you want to delete this custom report?")) {
+			redirect('/den_edit?delete=' + session);
+		}
+
+		return false;
+	});
+	
+});
+
+// let everything load, then load the first tab
+$(window).load(function() {
+	setTimeout(function() {
+		// show the first tab, since it's usually the only one visible at first
+		$('.den-tabs li a:first').trigger('click');
+	}, 0);
+});
+
+function hideLoader() {
+	var t = $('#tab-loading-info');
+
+	if (t.is(':visible')) {
+		t.stop().animate({ top: '-35px' }, 250, function() {
+			t.hide();
+		});
+	}
+}
+
+function showLoader(m) {
+	var t = $('#tab-loading-info');
+
+	t.children('span').html(m);
+
+	if (!t.is(':visible')) {
+		t.show().stop().animate({ top: '0px' }, 150);
+	}
+}
+
+function drawPortfolioPie(selector, data) {
+
+	if (!$(selector, tab).length) return;
+	
+	var pi = new crumbcake.charts.PieChart($(selector, tab).get(0));
+	pi.draw(data, portfolioPieConfig);
+
+	var pieChartClick = function() {
+		var t = $(selector, tab).parent().parent().parent().find('h3:first').text();
+
+		var modal = $('<div><p id="portfolio-pie-expl"></p><p>Click on any part of the graph to view domain names that match your criteria.</p><div id="portfolio-pie-modal"></div></div>').dialog2({
+			title: t,
+			id: 'portfolio-pie',
+			removeOnClose: true,
+			closeOnOverlayClick: true
+		});
+
+		$('#portfolio-pie').parent().addClass('portfolio-pie');
+		
+		$('#portfolio-pie-expl').text($(selector, tab).prev('p').text());
+		
+		var pi_o = new crumbcake.charts.PieChart($('#portfolio-pie-modal').get(0));
+		pi_o.draw(data, portfolioPieConfigModal);
+
+		crumbcake.charts.events.addListener(pi_o, 'onmouseover', function() {
+			$('#portfolio-pie-modal').find('iframe').contents().find('body').css('cursor', 'pointer');
+		});
+
+		crumbcake.charts.events.addListener(pi_o, 'onmouseout', function() {
+			$('#portfolio-pie-modal').find('iframe').contents().find('body').css('cursor', '');
+		});	
+
+		crumbcake.charts.events.addListener(pi_o, 'select', function() {
+			var sel = pi_o.getSelection()[0];
+			var d = data.getValue(sel.row, 0);
+
+			if (d == 'Other') return;
+
+			$('.modal-header .close').trigger('click');
+			addTransientTab('domain_search', t + ': ' + d, { search: selector.replace('.pie-', ''), val: d });
+		});
+
+		return false;
+	};
+
+	crumbcake.charts.events.addListener(pi, 'select', pieChartClick);
+
+	crumbcake.charts.events.addListener(pi, 'onmouseover', function() {
+		$(selector, tab).find('iframe').contents().find('body').css('cursor', function() {
+			if (jQuery.browser.mozilla) {
+				return 'url(magnify.cur), -moz-zoom-in';
+			}
+			else if (jQuery.browser.webkit) {
+				return 'url(magnify.cur), -webkit-zoom-in';
+			}
+			else {
+				return 'pointer'; 
+			}
+		});
+	});
+	
+	crumbcake.charts.events.addListener(pi, 'onmouseout', function() {
+		$(selector, tab).find('iframe').contents().find('body').css('cursor', '');
+	});
+
+	$(selector, tab).parent().parent().trigger('defer-loaded');
+	$(selector, tab).parent().parent().find('.pie-zoom').click(pieChartClick);
+
+	pis[selector] = pi;
+	
+}
+8º¡F§      UÇbêUÇbê;EB7UÉ¥   ":http://www.domainiq.com/js/den.js necko:classified 1 request-method GET response-head HTTP/1.1 200 OK
+Date: Thu, 18 Jun 2015 06:17:52 GMT
+Server: Apache
+Last-Modified: Wed, 12 Nov 2014 22:14:37 GMT
+Etag: "26111f-4862-507b0b8a4cd40"
+Accept-Ranges: bytes
+Content-Length: 18530
+Cache-Control: max-age=86400
+Expires: Fri, 19 Jun 2015 06:17:52 GMT
+Content-Type: application/javascript
+ uncompressed-len 0   Hb

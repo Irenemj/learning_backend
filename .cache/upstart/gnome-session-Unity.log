@@ -1,0 +1,4 @@
+
+** (update-notifier:2769): WARNING **: log file empty (logrotate?) /var/log/dpkg.log
+
+** (update-notifier:2769): WARNING **: log file empty (logrotate?) /var/log/apt/term.log

@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<compiz_session id="10e0db774a2773c443143521294394455400000017740001">
+  <window id="10e0db774a2773c443143521472690851100000017740045" title="Untitled 1 - LibreOffice Calc" class="libreoffice-calc" name="libreoffice" command="soffice">
+    <geometry x="65" y="25" width="1251" height="718"/>
+    <minimized/>
+    <maximized vert="yes" horz="yes"/>
+    <workspace index="0"/>
+  </window>
+</compiz_session>
